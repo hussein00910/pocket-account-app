@@ -1,0 +1,6 @@
+{
+  "name": "Pocket Ledger",
+  "description": "A elegant and modern manual ledger for tracking transactions, assets, budgets, and generating beautiful charts.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
