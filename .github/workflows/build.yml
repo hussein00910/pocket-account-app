@@ -7,6 +7,9 @@ on:
     branches: [ main, master ]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build-debug:
     name: Build Debug APK
@@ -21,20 +24,14 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-          cache: 'gradle'
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Accept Android SDK Licenses
-        run: yes | sdkmanager --licenses || true
-
-      - name: Install Android SDK 36
+      - name: Accept Android SDK Licenses & Install Android 36
         run: |
-          yes | sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools" || true
+          yes | sdkmanager --licenses || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools" || true
 
       - name: Create .env file (inject secrets)
         run: |
@@ -50,7 +47,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: pocket-ledger-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: app/build/outputs/apk/debug/*.apk
           retention-days: 30
 
       - name: Show APK info
@@ -73,20 +70,14 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-          cache: 'gradle'
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Accept Android SDK Licenses
-        run: yes | sdkmanager --licenses || true
-
-      - name: Install Android SDK 36
+      - name: Accept Android SDK Licenses & Install Android 36
         run: |
-          yes | sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools" || true
+          yes | sdkmanager --licenses || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools" || true
 
       - name: Create .env file (inject secrets)
         run: |
@@ -120,5 +111,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: pocket-ledger-release
-          path: app/build/outputs/apk/release/app-release.apk
+          path: app/build/outputs/apk/release/*.apk
           retention-days: 90
