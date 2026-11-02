@@ -95,6 +95,18 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun updateTransaction(transaction: TransactionEntity) {
+        viewModelScope.launch {
+            repository.updateTransaction(transaction)
+        }
+    }
+
+    fun clearAllData() {
+        viewModelScope.launch {
+            database.clearAllTables()
+        }
+    }
+
     fun setBudget(category: String, amount: Double) {
         viewModelScope.launch {
             repository.insertBudget(BudgetEntity(category, amount))
@@ -111,13 +123,19 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             val txs = transactions.value
             val bgs = budgets.value
+            val isArabic = java.util.Locale.getDefault().language == "ar"
+
             if (txs.isEmpty()) {
-                _aiInsightState.value = "You have no transactions to analyze. Please add some expenses first so I can inspect your spend layout!"
+                _aiInsightState.value = if (isArabic) {
+                    "ليس لديك أي معاملات لتحليلها. يرجى إضافة بعض المصاريف أولاً حتى أتمكن من فحص مخطط مصروفاتك!"
+                } else {
+                    "You have no transactions to analyze. Please add some expenses first so I can inspect your spend layout!"
+                }
                 return@launch
             }
 
             _isAiLoading.value = true
-            _aiInsightState.value = "Analyzing ledger items..."
+            _aiInsightState.value = if (isArabic) "جاري تحليل المعاملات..." else "Analyzing ledger items..."
 
             val totalIncome = txs.filter { it.type == "INCOME" }.sumOf { it.amount }
             val totalExpense = txs.filter { it.type == "EXPENSE" }.sumOf { it.amount }
@@ -140,7 +158,7 @@ class LedgerViewModel(application: Application) : AndroidViewModel(application) 
                 $listSummary
             """.trimIndent()
 
-            val insight = GeminiClient.getFinancialInsight(summaryPrompt)
+            val insight = GeminiClient.getFinancialInsight(summaryPrompt, isArabic)
             _aiInsightState.value = insight
             _isAiLoading.value = false
         }

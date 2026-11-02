@@ -1,5 +1,6 @@
 package com.example
 
+import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -32,9 +33,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -50,6 +53,46 @@ import com.example.ui.LedgerViewModel
 import com.example.ui.theme.MyApplicationTheme
 import java.text.SimpleDateFormat
 import java.util.*
+
+// --- Currency helpers ---
+fun getCurrencySymbol(context: Context): String {
+    val prefs = context.getSharedPreferences("pocket_ledger_prefs", Context.MODE_PRIVATE)
+    return prefs.getString("currency_symbol", "$") ?: "$"
+}
+
+fun setCurrencySymbol(context: Context, symbol: String) {
+    val prefs = context.getSharedPreferences("pocket_ledger_prefs", Context.MODE_PRIVATE)
+    prefs.edit().putString("currency_symbol", symbol).apply()
+}
+
+fun formatCurrency(amount: Double, symbol: String, showPlusSign: Boolean = false): String {
+    val formatted = String.format(Locale.getDefault(), "%,.2f", Math.abs(amount))
+    val prefix = if (amount < 0) "-" else if (showPlusSign && amount > 0) "+" else ""
+    return "$prefix$symbol$formatted"
+}
+
+@Composable
+fun getCategoryDisplayName(categoryName: String): String {
+    return when (categoryName.lowercase(Locale.ROOT)) {
+        "food" -> stringResource(R.string.category_food)
+        "shopping" -> stringResource(R.string.category_shopping)
+        "bills" -> stringResource(R.string.category_bills)
+        "transport" -> stringResource(R.string.category_transport)
+        "leisure" -> stringResource(R.string.category_leisure)
+        "salary" -> stringResource(R.string.category_salary)
+        else -> stringResource(R.string.category_other)
+    }
+}
+
+@Composable
+fun getAccountDisplayName(accountName: String): String {
+    return when (accountName.lowercase(Locale.ROOT)) {
+        "cash" -> stringResource(R.string.account_cash)
+        "card" -> stringResource(R.string.account_card)
+        "savings" -> stringResource(R.string.account_savings)
+        else -> accountName
+    }
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -95,6 +138,9 @@ fun getCategoryConfig(name: String): CategoryConfig {
 fun PocketLedgerScreen(
     viewModel: LedgerViewModel = viewModel()
 ) {
+    val context = LocalContext.current
+    var currencySymbol by remember { mutableStateOf(getCurrencySymbol(context)) }
+
     val transactions by viewModel.transactions.collectAsStateWithLifecycle()
     val budgets by viewModel.budgets.collectAsStateWithLifecycle()
     val aiAdvice by viewModel.aiInsightState.collectAsStateWithLifecycle()
@@ -102,6 +148,7 @@ fun PocketLedgerScreen(
 
     var showAddDialog by remember { mutableStateOf(false) }
     var showBudgetDialog by remember { mutableStateOf(false) }
+    var editingTransaction by remember { mutableStateOf<TransactionEntity?>(null) }
 
     // Filter and search state
     var searchKeyword by remember { mutableStateOf("") }
@@ -160,7 +207,7 @@ fun PocketLedgerScreen(
                 },
                 title = {
                     val currentMonthYear = remember {
-                        SimpleDateFormat("MMMM yyyy", Locale.US).format(Date())
+                        SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(Date())
                     }
                     Text(
                         text = currentMonthYear,
@@ -171,21 +218,16 @@ fun PocketLedgerScreen(
                     )
                 },
                 actions = {
-                    Box(
+                    IconButton(
+                        onClick = { showBudgetDialog = true },
                         modifier = Modifier
                             .padding(end = 12.dp)
-                            .size(40.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.primaryContainer)
-                            .clickable { showBudgetDialog = true }
-                            .testTag("budget_settings_button"),
-                        contentAlignment = Alignment.Center
+                            .testTag("budget_settings_button")
                     ) {
-                        Text(
-                            text = "JD",
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp
+                        Icon(
+                            imageVector = Icons.Rounded.Settings,
+                            contentDescription = stringResource(R.string.settings),
+                            tint = MaterialTheme.colorScheme.primary
                         )
                     }
                 },
@@ -196,12 +238,15 @@ fun PocketLedgerScreen(
         },
         floatingActionButton = {
             FloatingActionButton(
-                onClick = { showAddDialog = true },
+                onClick = { 
+                    editingTransaction = null
+                    showAddDialog = true 
+                },
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary,
                 modifier = Modifier.testTag("add_transaction_fab")
             ) {
-                Icon(imageVector = Icons.Default.Add, contentDescription = "Add Transaction")
+                Icon(imageVector = Icons.Default.Add, contentDescription = stringResource(R.string.add))
             }
         }
     ) { innerPadding ->
@@ -217,7 +262,8 @@ fun PocketLedgerScreen(
                 NetWorthBanner(
                     netWorth = netWorth,
                     totalIncome = totalIncome,
-                    totalExpense = totalExpense
+                    totalExpense = totalExpense,
+                    currencySymbol = currencySymbol
                 )
             }
 
@@ -235,7 +281,10 @@ fun PocketLedgerScreen(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier
                             .weight(1f)
-                            .clickable { showAddDialog = true }
+                            .clickable { 
+                                editingTransaction = null
+                                showAddDialog = true 
+                            }
                     ) {
                         Box(
                             modifier = Modifier
@@ -246,7 +295,7 @@ fun PocketLedgerScreen(
                             Text("+", color = MaterialTheme.colorScheme.onPrimaryContainer, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                         }
                         Spacer(modifier = Modifier.height(6.dp))
-                        Text("Add", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onBackground)
+                        Text(stringResource(R.string.add), fontSize = 11.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onBackground)
                     }
 
                     // Button 2: Toggle Charts Breakdown (Reports)
@@ -267,7 +316,7 @@ fun PocketLedgerScreen(
                             Text("📊", fontSize = 20.sp)
                         }
                         Spacer(modifier = Modifier.height(6.dp))
-                        Text("Reports", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onBackground)
+                        Text(stringResource(R.string.reports), fontSize = 11.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onBackground)
                     }
 
                     // Button 3: Budget Configuration modal (Transfer action representation)
@@ -286,7 +335,7 @@ fun PocketLedgerScreen(
                             Text("⇅", fontSize = 22.sp)
                         }
                         Spacer(modifier = Modifier.height(6.dp))
-                        Text("Transfer", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onBackground)
+                        Text(stringResource(R.string.transfer), fontSize = 11.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onBackground)
                     }
 
                     // Button 4: Audit check / trigger AI Coach
@@ -305,7 +354,7 @@ fun PocketLedgerScreen(
                             Text("🧾", fontSize = 20.sp)
                         }
                         Spacer(modifier = Modifier.height(6.dp))
-                        Text("Audit", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onBackground)
+                        Text(stringResource(R.string.audit), fontSize = 11.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onBackground)
                     }
                 }
             }
@@ -315,7 +364,8 @@ fun PocketLedgerScreen(
                 AccountsBreakdownRow(
                     cash = cashBalance,
                     card = cardBalance,
-                    savings = savingsBalance
+                    savings = savingsBalance,
+                    currencySymbol = currencySymbol
                 )
             }
 
@@ -324,7 +374,8 @@ fun PocketLedgerScreen(
                 InteractiveChartsCard(
                     transactions = transactions,
                     selectedChartTab = selectedChartTab,
-                    onTabChanged = { selectedChartTab = it }
+                    onTabChanged = { selectedChartTab = it },
+                    currencySymbol = currencySymbol
                 )
             }
 
@@ -342,7 +393,8 @@ fun PocketLedgerScreen(
                 item {
                     BudgetsProgressCard(
                         budgets = budgets,
-                        transactions = transactions
+                        transactions = transactions,
+                        currencySymbol = currencySymbol
                     )
                 }
             }
@@ -351,7 +403,7 @@ fun PocketLedgerScreen(
             item {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Text(
-                        text = "Transaction Ledger",
+                        text = stringResource(R.string.transaction_ledger),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onBackground,
@@ -365,12 +417,12 @@ fun PocketLedgerScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("ledger_search_input"),
-                        placeholder = { Text("Search transactions or categories...") },
+                        placeholder = { Text(stringResource(R.string.search_placeholder)) },
                         leadingIcon = { Icon(imageVector = Icons.Rounded.Search, contentDescription = "Search") },
                         trailingIcon = {
                             if (searchKeyword.isNotEmpty()) {
                                 IconButton(onClick = { searchKeyword = "" }) {
-                                    Icon(imageVector = Icons.Rounded.Close, contentDescription = "Clear search")
+                                    Icon(imageVector = Icons.Rounded.Close, contentDescription = stringResource(R.string.clear_search))
                                 }
                             }
                         },
@@ -385,7 +437,12 @@ fun PocketLedgerScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        listOf("All Records", "Expenses", "Incomes").forEachIndexed { index, title ->
+                        val filterLabels = listOf(
+                            stringResource(R.string.all_records),
+                            stringResource(R.string.expenses),
+                            stringResource(R.string.incomes)
+                        )
+                        filterLabels.forEachIndexed { index, title ->
                             FilterChip(
                                 modifier = Modifier.weight(1f).testTag("filter_chip_$index"),
                                 selected = selectedFilterTab == index,
@@ -426,7 +483,7 @@ fun PocketLedgerScreen(
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                text = if (searchKeyword.isNotEmpty()) "No matches found" else "No transactions recorded yet",
+                                text = if (searchKeyword.isNotEmpty()) stringResource(R.string.no_matches_found) else stringResource(R.string.no_transactions_yet),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.outline
                             )
@@ -437,6 +494,11 @@ fun PocketLedgerScreen(
                 items(filteredTransactions, key = { it.id }) { tx ->
                     TransactionItemRow(
                         transaction = tx,
+                        currencySymbol = currencySymbol,
+                        onEdit = {
+                            editingTransaction = tx
+                            showAddDialog = true
+                        },
                         onDelete = { viewModel.deleteTransaction(tx) }
                     )
                 }
@@ -452,23 +514,51 @@ fun PocketLedgerScreen(
     // Modal quick-add form dialog
     if (showAddDialog) {
         AddTransactionModal(
-            onDismiss = { showAddDialog = false },
-            onConfirm = { desc, amt, type, cat, acc, date ->
-                viewModel.addTransaction(desc, amt, type, cat, acc, date)
+            transactionToEdit = editingTransaction,
+            onDismiss = { 
                 showAddDialog = false
+                editingTransaction = null
+            },
+            onConfirm = { desc, amt, type, cat, acc, date ->
+                if (editingTransaction != null) {
+                    viewModel.updateTransaction(
+                        editingTransaction!!.copy(
+                            description = desc,
+                            amount = amt,
+                            type = type,
+                            category = cat,
+                            account = acc,
+                            timestamp = date
+                        )
+                    )
+                } else {
+                    viewModel.addTransaction(desc, amt, type, cat, acc, date)
+                }
+                showAddDialog = false
+                editingTransaction = null
             }
         )
     }
 
-    // Modal budget settings dialog
+    // Modal budget & settings dialog
     if (showBudgetDialog) {
         BudgetSettingsModal(
             budgets = budgets,
             onDismiss = { showBudgetDialog = false },
             onSaveBudget = { cat, amt -> viewModel.setBudget(cat, amt) },
-            onDeleteBudget = { cat -> viewModel.deleteBudget(cat) }
+            onDeleteBudget = { cat -> viewModel.deleteBudget(cat) },
+            currentCurrency = currencySymbol,
+            onCurrencyChanged = { newSymbol ->
+                currencySymbol = newSymbol
+                setCurrencySymbol(context, newSymbol)
+            },
+            onClearAllData = {
+                viewModel.clearAllData()
+                showBudgetDialog = false
+            }
         )
     }
+}
 }
 
 // --- Total Net Worth Banner Card ---
@@ -476,7 +566,8 @@ fun PocketLedgerScreen(
 fun NetWorthBanner(
     netWorth: Double,
     totalIncome: Double,
-    totalExpense: Double
+    totalExpense: Double,
+    currencySymbol: String
 ) {
     Card(
         modifier = Modifier
@@ -501,14 +592,14 @@ fun NetWorthBanner(
             ) {
                 Column {
                     Text(
-                        text = "Total Balance",
+                        text = stringResource(R.string.total_balance),
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Normal,
                         color = Color.White.copy(alpha = 0.9f)
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = String.format(Locale.US, "$%,.2f", netWorth),
+                        text = formatCurrency(netWorth, currencySymbol),
                         fontSize = 32.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White,
@@ -526,7 +617,7 @@ fun NetWorthBanner(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "$",
+                        text = currencySymbol,
                         color = Color.White,
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold,
@@ -548,7 +639,7 @@ fun NetWorthBanner(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "MONTHLY INCOME",
+                            text = stringResource(R.string.monthly_income),
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White.copy(alpha = 0.7f),
@@ -556,7 +647,7 @@ fun NetWorthBanner(
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = String.format(Locale.US, "+$%,.2f", totalIncome),
+                            text = formatCurrency(totalIncome, currencySymbol, showPlusSign = true),
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFF6DE19E) // Emerald green
@@ -575,7 +666,7 @@ fun NetWorthBanner(
                         horizontalAlignment = Alignment.End
                     ) {
                         Text(
-                            text = "MONTHLY SPENT",
+                            text = stringResource(R.string.monthly_spent),
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White.copy(alpha = 0.7f),
@@ -583,7 +674,7 @@ fun NetWorthBanner(
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = String.format(Locale.US, "-$%,.2f", totalExpense),
+                            text = formatCurrency(-totalExpense, currencySymbol),
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFFFF8E94) // Rose red
@@ -600,7 +691,8 @@ fun NetWorthBanner(
 fun AccountsBreakdownRow(
     cash: Double,
     card: Double,
-    savings: Double
+    savings: Double,
+    currencySymbol: String
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -634,11 +726,11 @@ fun AccountsBreakdownRow(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(name, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.outline)
+                        Text(getAccountDisplayName(name), fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.outline)
                         Icon(imageVector = icon, contentDescription = name, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(14.dp))
                     }
                     Text(
-                        text = String.format(Locale.US, "$%,.2f", balance),
+                        text = formatCurrency(balance, currencySymbol),
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
                         color = if (balance >= 0) MaterialTheme.colorScheme.onSurface else Color(0xFFEF5350),
@@ -656,7 +748,8 @@ fun AccountsBreakdownRow(
 fun InteractiveChartsCard(
     transactions: List<TransactionEntity>,
     selectedChartTab: Int,
-    onTabChanged: (Int) -> Unit
+    onTabChanged: (Int) -> Unit,
+    currencySymbol: String
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -680,7 +773,7 @@ fun InteractiveChartsCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Visual Audits",
+                    text = stringResource(R.string.visual_audits),
                     fontWeight = FontWeight.Bold,
                     fontSize = 15.sp,
                     color = MaterialTheme.colorScheme.onSurface
@@ -693,7 +786,10 @@ fun InteractiveChartsCard(
                         .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f))
                         .padding(2.dp)
                 ) {
-                    val tabs = listOf("Weekly Outflows", "Categories Breakdown")
+                    val tabs = listOf(
+                        stringResource(R.string.weekly_outflows),
+                        stringResource(R.string.categories_breakdown)
+                    )
                     tabs.forEachIndexed { idx, label ->
                         val isSel = selectedChartTab == idx
                         Box(
@@ -731,17 +827,18 @@ fun InteractiveChartsCard(
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            "Record some expenses to draw visual insights",
+                            text = stringResource(R.string.no_outflows_chart_msg),
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.outline
+                            color = MaterialTheme.colorScheme.outline,
+                            textAlign = TextAlign.Center
                         )
                     }
                 } else if (selectedChartTab == 0) {
                     // Custom Bar Chart: Outflow Trends (last 7 calendar days)
-                    WeeklyOutflowBarChart(transactions = transactions)
+                    WeeklyOutflowBarChart(transactions = transactions, currencySymbol = currencySymbol)
                 } else {
                     // Custom Ring/Donut Chart: Categories Breakdown
-                    CategoryDonutChart(transactions = transactions)
+                    CategoryDonutChart(transactions = transactions, currencySymbol = currencySymbol)
                 }
             }
         }
@@ -750,7 +847,7 @@ fun InteractiveChartsCard(
 
 // --- Weekly Outflow Canvas Bar Chart ---
 @Composable
-fun WeeklyOutflowBarChart(transactions: List<TransactionEntity>) {
+fun WeeklyOutflowBarChart(transactions: List<TransactionEntity>, currencySymbol: String) {
     val expenses = transactions.filter { it.type == "EXPENSE" }
 
     // Aggregate expense by Day of Week: Sunday = 1 to Saturday = 7
@@ -849,7 +946,7 @@ fun WeeklyOutflowBarChart(transactions: List<TransactionEntity>) {
                     color = MaterialTheme.colorScheme.outline
                 )
                 Text(
-                    text = if (dayOutflows[i] > 0) String.format(Locale.US, "$%.0f", dayOutflows[i]) else "-",
+                    text = if (dayOutflows[i] > 0) formatCurrency(dayOutflows[i], currencySymbol) else "-",
                     fontSize = 8.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                     fontFamily = FontFamily.Monospace
@@ -861,7 +958,7 @@ fun WeeklyOutflowBarChart(transactions: List<TransactionEntity>) {
 
 // --- Category Outflow Donut Canvas Chart ---
 @Composable
-fun CategoryDonutChart(transactions: List<TransactionEntity>) {
+fun CategoryDonutChart(transactions: List<TransactionEntity>, currencySymbol: String) {
     val expenses = transactions.filter { it.type == "EXPENSE" }
 
     val categoryTotals = remember(expenses) {
@@ -922,9 +1019,9 @@ fun CategoryDonutChart(transactions: List<TransactionEntity>) {
 
             // Central Summary Label
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("Total outflows", fontSize = 8.sp, color = MaterialTheme.colorScheme.outline)
+                Text(stringResource(R.string.total_outflows), fontSize = 8.sp, color = MaterialTheme.colorScheme.outline)
                 Text(
-                    text = String.format(Locale.US, "$%.0f", totalSpent),
+                    text = formatCurrency(totalSpent, currencySymbol),
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Black,
                     fontFamily = FontFamily.Monospace,
@@ -958,7 +1055,7 @@ fun CategoryDonutChart(transactions: List<TransactionEntity>) {
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = catName,
+                            text = getCategoryDisplayName(catName),
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface,
@@ -966,7 +1063,7 @@ fun CategoryDonutChart(transactions: List<TransactionEntity>) {
                         )
                     }
                     Text(
-                        text = String.format(Locale.US, "$%.0f (%.1f%%)", amount, percent),
+                        text = "${formatCurrency(amount, currencySymbol)} (${String.format(Locale.getDefault(), "%.1f%%", percent)})",
                         fontSize = 9.sp,
                         color = MaterialTheme.colorScheme.outline,
                         fontFamily = FontFamily.Monospace
@@ -976,7 +1073,7 @@ fun CategoryDonutChart(transactions: List<TransactionEntity>) {
 
             if (categoryTotals.size > 4) {
                 Text(
-                    text = "+ ${categoryTotals.size - 4} other categories",
+                    text = "+ ${categoryTotals.size - 4} " + stringResource(R.string.category_other),
                     fontSize = 8.sp,
                     color = MaterialTheme.colorScheme.outline,
                     modifier = Modifier.padding(start = 14.dp)
@@ -1111,7 +1208,8 @@ fun AiCoachPanel(
 @Composable
 fun BudgetsProgressCard(
     budgets: List<BudgetEntity>,
-    transactions: List<TransactionEntity>
+    transactions: List<TransactionEntity>,
+    currencySymbol: String
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -1128,7 +1226,7 @@ fun BudgetsProgressCard(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Text(
-                text = "Budget Controls",
+                text = stringResource(R.string.budget_controls),
                 fontWeight = FontWeight.Bold,
                 fontSize = 14.sp,
                 color = MaterialTheme.colorScheme.onSurface
@@ -1157,12 +1255,12 @@ fun BudgetsProgressCard(
                                     .background(colorConfig.color)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text(budget.category, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text(getCategoryDisplayName(budget.category), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
 
                         // Text numeric markers
                         Text(
-                            text = String.format(Locale.US, "$%,.2f / $%,.2f", spent, budget.limitAmount),
+                            text = "${formatCurrency(spent, currencySymbol)} / ${formatCurrency(budget.limitAmount, currencySymbol)}",
                             fontSize = 11.sp,
                             fontFamily = FontFamily.Monospace,
                             color = if (progress >= 1.0f) Color(0xFFEF5350) else MaterialTheme.colorScheme.outline
@@ -1184,7 +1282,7 @@ fun BudgetsProgressCard(
 
                     if (progress >= 1.0f) {
                         Text(
-                            text = "⚠ OVER BUDGET LIMIT!",
+                            text = stringResource(R.string.over_budget_limit),
                             fontSize = 8.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFFEF5350),
@@ -1201,10 +1299,12 @@ fun BudgetsProgressCard(
 @Composable
 fun TransactionItemRow(
     transaction: TransactionEntity,
+    currencySymbol: String,
+    onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
     val categoryConfig = getCategoryConfig(transaction.category)
-    val formatter = remember { SimpleDateFormat("MMM d, h:mm a", Locale.US) }
+    val formatter = remember { SimpleDateFormat("MMM d, h:mm a", Locale.getDefault()) }
     val formattedDate = remember(transaction.timestamp) {
         formatter.format(Date(transaction.timestamp))
     }
@@ -1212,7 +1312,8 @@ fun TransactionItemRow(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 2.dp),
+            .padding(vertical = 2.dp)
+            .clickable { onEdit() },
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
@@ -1240,7 +1341,7 @@ fun TransactionItemRow(
                 ) {
                     Icon(
                         imageVector = categoryConfig.icon,
-                        contentDescription = transaction.category,
+                        contentDescription = getCategoryDisplayName(transaction.category),
                         tint = categoryConfig.color,
                         modifier = Modifier.size(18.dp)
                     )
@@ -1268,7 +1369,7 @@ fun TransactionItemRow(
                                 .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
                                 .padding(horizontal = 4.dp, vertical = 2.dp)
                         ) {
-                            Text(transaction.account, fontSize = 8.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.outline)
+                            Text(getAccountDisplayName(transaction.account), fontSize = 8.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.outline)
                         }
                         Text(
                             text = formattedDate,
@@ -1299,7 +1400,7 @@ fun TransactionItemRow(
                 }
 
                 Text(
-                    text = String.format(Locale.US, "%s$%,.2f", if (transaction.type == "INCOME") "+" else "-", transaction.amount),
+                    text = formatCurrency(if (transaction.type == "INCOME") transaction.amount else -transaction.amount, currencySymbol, showPlusSign = (transaction.type == "INCOME")),
                     style = textStyle,
                     modifier = Modifier.testTag("tx_item_amount_${transaction.id}")
                 )
@@ -1312,27 +1413,60 @@ fun TransactionItemRow(
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.DeleteOutline,
-                        contentDescription = "Delete record",
+                        contentDescription = stringResource(R.string.delete_record),
                         tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f),
                         modifier = Modifier.size(16.dp)
                     )
                 }
             }
         }
+  // --- Custom Date Picker Dialog ---
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TransactionDatePickerDialog(
+    initialSelectedDateMillis: Long,
+    onDateSelected: (Long) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val datePickerState = rememberDatePickerState(
+        initialSelectedDateMillis = initialSelectedDateMillis
+    )
+    DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = {
+                datePickerState.selectedDateMillis?.let { onDateSelected(it) }
+                onDismiss()
+            }) {
+                Text(stringResource(R.string.done))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel))
+            }
+        }
+    ) {
+        DatePicker(state = datePickerState)
     }
 }
 
-// --- Quick Add Transaction Dialog ---
+// --- Quick Add/Edit Transaction Dialog ---
 @Composable
 fun AddTransactionModal(
+    transactionToEdit: TransactionEntity? = null,
     onDismiss: () -> Unit,
     onConfirm: (String, Double, String, String, String, Long) -> Unit
 ) {
-    var desc by remember { mutableStateOf("") }
-    var amountString by remember { mutableStateOf("") }
-    var selectedType by remember { mutableStateOf("EXPENSE") } // INCOME or EXPENSE
-    var selectedCategory by remember { mutableStateOf("Food") }
-    var selectedAccount by remember { mutableStateOf("Cash") }
+    var desc by remember { mutableStateOf(transactionToEdit?.description ?: "") }
+    var amountString by remember { mutableStateOf(transactionToEdit?.amount?.let { if (it == 0.0) "" else it.toString() } ?: "") }
+    var selectedType by remember { mutableStateOf(transactionToEdit?.type ?: "EXPENSE") } // INCOME or EXPENSE
+    var selectedCategory by remember { mutableStateOf(transactionToEdit?.category ?: "Food") }
+    var selectedAccount by remember { mutableStateOf(transactionToEdit?.account ?: "Cash") }
+    var selectedDateMillis by remember { mutableStateOf(transactionToEdit?.timestamp ?: System.currentTimeMillis()) }
+
+    var showDatePicker by remember { mutableStateOf(false) }
+    val dateFormatter = remember { SimpleDateFormat("MMM d, yyyy", Locale.getDefault()) }
 
     val focusManager = LocalFocusManager.current
 
@@ -1354,7 +1488,7 @@ fun AddTransactionModal(
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 Text(
-                    text = "New Accounting Log",
+                    text = if (transactionToEdit != null) stringResource(R.string.edit_accounting_log) else stringResource(R.string.new_accounting_log),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface
@@ -1368,7 +1502,11 @@ fun AddTransactionModal(
                         .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
                         .padding(2.dp)
                 ) {
-                    listOf("EXPENSE" to "Outflow", "INCOME" to "Income").forEach { (v, lbl) ->
+                    val typesList = listOf(
+                        "EXPENSE" to stringResource(R.string.outflow),
+                        "INCOME" to stringResource(R.string.income)
+                    )
+                    typesList.forEach { (v, lbl) ->
                         val isSel = selectedType == v
                         Box(
                             modifier = Modifier
@@ -1404,7 +1542,7 @@ fun AddTransactionModal(
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("add_tx_amount_input"),
-                    label = { Text("Amount ($)") },
+                    label = { Text(stringResource(R.string.amount_label)) },
                     placeholder = { Text("0.00") },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
@@ -1417,13 +1555,41 @@ fun AddTransactionModal(
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("add_tx_desc_input"),
-                    label = { Text("Description") },
-                    placeholder = { Text("e.g. Grocery Store buy") },
+                    label = { Text(stringResource(R.string.description_label)) },
+                    placeholder = { Text(stringResource(R.string.description_placeholder)) },
                     singleLine = true
                 )
 
+                // Date Selection row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = stringResource(R.string.date),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.outline
+                    )
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                            .clickable { showDatePicker = true }
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
+                        Text(
+                            text = dateFormatter.format(Date(selectedDateMillis)),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+
                 // Category Selection list choices
-                Text("Select Category", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.outline)
+                Text(stringResource(R.string.select_category), fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.outline)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1463,7 +1629,7 @@ fun AddTransactionModal(
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(imageVector = conf.icon, contentDescription = category, tint = if (isSel) Color.White else conf.color, modifier = Modifier.size(12.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Text(category, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (isSel) Color.White else MaterialTheme.colorScheme.onSurface)
+                                    Text(getCategoryDisplayName(category), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (isSel) Color.White else MaterialTheme.colorScheme.onSurface)
                                 }
                             }
                         }
@@ -1471,7 +1637,7 @@ fun AddTransactionModal(
                 }
 
                 // Account selection Cash / Card / Savings
-                Text("Funding Wallet Account", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.outline)
+                Text(stringResource(R.string.funding_wallet_account), fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.outline)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -1489,7 +1655,7 @@ fun AddTransactionModal(
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = account,
+                                text = getAccountDisplayName(account),
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = if (isSel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
@@ -1509,14 +1675,14 @@ fun AddTransactionModal(
                         onClick = onDismiss,
                         modifier = Modifier.weight(1f)
                     ) {
-                        Text("Cancel")
+                        Text(stringResource(R.string.cancel))
                     }
 
                     Button(
                         onClick = {
                             val amt = amountString.toDoubleOrNull() ?: 0.0
                             if (amt > 0.0) {
-                                onConfirm(desc, amt, selectedType, selectedCategory, selectedAccount, System.currentTimeMillis())
+                                onConfirm(desc, amt, selectedType, selectedCategory, selectedAccount, selectedDateMillis)
                             }
                         },
                         modifier = Modifier
@@ -1526,11 +1692,24 @@ fun AddTransactionModal(
                             containerColor = if (selectedType == "EXPENSE") Color(0xFFEF5350) else Color(0xFF66BB6A)
                         )
                     ) {
-                        Text("Log", color = Color.White)
+                        Text(
+                            text = if (transactionToEdit != null) stringResource(R.string.save) else stringResource(R.string.log),
+                            color = Color.White
+                        )
                     }
                 }
             }
         }
+    }
+
+    if (showDatePicker) {
+        TransactionDatePickerDialog(
+            initialSelectedDateMillis = selectedDateMillis,
+            onDateSelected = { selectedDateMillis = it },
+            onDismiss = { showDatePicker = false }
+        )
+    }
+}
     }
 }
 
@@ -1540,10 +1719,14 @@ fun BudgetSettingsModal(
     budgets: List<BudgetEntity>,
     onDismiss: () -> Unit,
     onSaveBudget: (String, Double) -> Unit,
-    onDeleteBudget: (String) -> Unit
+    onDeleteBudget: (String) -> Unit,
+    currentCurrency: String,
+    onCurrencyChanged: (String) -> Unit,
+    onClearAllData: () -> Unit
 ) {
     var targetCategory by remember { mutableStateOf("Food") }
     var limitInput by remember { mutableStateOf("") }
+    var showClearConfirmation by remember { mutableStateOf(false) }
 
     Dialog(onDismissRequest = onDismiss) {
         Card(
@@ -1560,14 +1743,14 @@ fun BudgetSettingsModal(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Text(
-                    text = "Configure Visual Budgets",
+                    text = stringResource(R.string.app_settings),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
 
                 // Select category slider
-                Text("Select Spending Category", fontSize = 11.sp, color = MaterialTheme.colorScheme.outline)
+                Text(stringResource(R.string.select_spending_category), fontSize = 11.sp, color = MaterialTheme.colorScheme.outline)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -1586,7 +1769,7 @@ fun BudgetSettingsModal(
                                 .padding(vertical = 8.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(cat, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (isSel) conf.color else MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(getCategoryDisplayName(cat), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (isSel) conf.color else MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
@@ -1602,7 +1785,7 @@ fun BudgetSettingsModal(
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("budget_limit_input"),
-                    label = { Text("Monthly spending limit ($)") },
+                    label = { Text(stringResource(R.string.monthly_spending_limit) + " ($currentCurrency)") },
                     placeholder = { Text("e.g. 500") },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
@@ -1625,7 +1808,7 @@ fun BudgetSettingsModal(
                             .weight(1f)
                             .testTag("save_budget_button")
                     ) {
-                        Text("Apply")
+                        Text(stringResource(R.string.apply))
                     }
 
                     // Delete budget limit
@@ -1636,21 +1819,47 @@ fun BudgetSettingsModal(
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFEF5350)),
                         modifier = Modifier.weight(1f)
                     ) {
-                        Text("Clear Limit")
+                        Text(stringResource(R.string.clear_limit))
+                    }
+                }
+
+                Divider(modifier = Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+
+                // Preferred Currency Selector
+                Text(stringResource(R.string.select_currency), fontSize = 11.sp, color = MaterialTheme.colorScheme.outline)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    val currencies = listOf("$", "€", "£", "د.أ", "ر.س", "د.إ", "ج.م")
+                    currencies.forEach { sym ->
+                        val isSel = currentCurrency == sym
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSel) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                                .border(1.dp, if (isSel) MaterialTheme.colorScheme.primary else Color.Transparent, RoundedCornerShape(8.dp))
+                                .clickable { onCurrencyChanged(sym) }
+                                .padding(vertical = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(sym, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (isSel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                     }
                 }
 
                 Divider(modifier = Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
 
                 // Active Budgets listing
-                Text("Active Limit Controls", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.outline)
+                Text(stringResource(R.string.active_limit_controls), fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.outline)
                 if (budgets.isEmpty()) {
-                    Text("No budgets established yet.", fontSize = 11.sp, color = MaterialTheme.colorScheme.outline)
+                    Text(stringResource(R.string.no_budgets_established), fontSize = 11.sp, color = MaterialTheme.colorScheme.outline)
                 } else {
                     LazyColumn(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(max = 140.dp)
+                            .heightIn(max = 100.dp)
                     ) {
                         items(budgets) { budget ->
                             Row(
@@ -1668,10 +1877,10 @@ fun BudgetSettingsModal(
                                             .background(getCategoryConfig(budget.category).color)
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text(budget.category, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    Text(getCategoryDisplayName(budget.category), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                 }
                                 Text(
-                                    text = String.format(Locale.US, "$%,.2f Limit", budget.limitAmount),
+                                    text = "${formatCurrency(budget.limitAmount, currentCurrency)}",
                                     fontSize = 11.sp,
                                     fontFamily = FontFamily.Monospace,
                                     fontWeight = FontWeight.Bold,
@@ -1682,13 +1891,47 @@ fun BudgetSettingsModal(
                     }
                 }
 
+                Divider(modifier = Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+
+                // Danger Zone - Clear All Data Button
+                Button(
+                    onClick = { showClearConfirmation = true },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF5350)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(stringResource(R.string.clear_all_data), color = Color.White)
+                }
+
                 Button(
                     onClick = onDismiss,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Done")
+                    Text(stringResource(R.string.done))
                 }
             }
         }
+    }
+
+    if (showClearConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showClearConfirmation = false },
+            title = { Text(stringResource(R.string.clear_all_data)) },
+            text = { Text(stringResource(R.string.clear_all_data_confirm)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onClearAllData()
+                        showClearConfirmation = false
+                    }
+                ) {
+                    Text(stringResource(R.string.clear_all_data_button), color = Color(0xFFEF5350))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearConfirmation = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            }
+        )
     }
 }

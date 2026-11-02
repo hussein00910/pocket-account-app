@@ -1,0 +1,124 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-debug:
+    name: Build Debug APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android SDK Licenses
+        run: yes | sdkmanager --licenses || true
+
+      - name: Install Android SDK 36
+        run: |
+          yes | sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools" || true
+
+      - name: Create .env file (inject secrets)
+        run: |
+          echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" > .env
+
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
+      - name: Build Debug APK
+        run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
+
+      - name: Upload Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: pocket-ledger-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30
+
+      - name: Show APK info
+        run: |
+          echo "✅ Build successful!"
+          ls -lh app/build/outputs/apk/debug/
+
+  build-release:
+    name: Build Release APK
+    runs-on: ubuntu-latest
+    # Only runs on main/master push (not PRs)
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android SDK Licenses
+        run: yes | sdkmanager --licenses || true
+
+      - name: Install Android SDK 36
+        run: |
+          yes | sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools" || true
+
+      - name: Create .env file (inject secrets)
+        run: |
+          echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" > .env
+
+      - name: Check Keystore Secret
+        id: check_keystore
+        run: |
+          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > my-upload-key.jks
+            echo "KEYSTORE_PATH=${{ github.workspace }}/my-upload-key.jks" >> $GITHUB_ENV
+            echo "has_keystore=true" >> $GITHUB_OUTPUT
+          else
+            echo "::warning::KEYSTORE_BASE64 not configured in repository secrets. Skipping release signing."
+            echo "has_keystore=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Make gradlew executable
+        if: steps.check_keystore.outputs.has_keystore == 'true'
+        run: chmod +x gradlew
+
+      - name: Build Release APK
+        if: steps.check_keystore.outputs.has_keystore == 'true'
+        env:
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: ./gradlew :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Upload Release APK
+        if: steps.check_keystore.outputs.has_keystore == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pocket-ledger-release
+          path: app/build/outputs/apk/release/app-release.apk
+          retention-days: 90

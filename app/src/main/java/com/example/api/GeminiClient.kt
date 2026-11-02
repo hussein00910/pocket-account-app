@@ -63,12 +63,16 @@ object GeminiClient {
             .create(GeminiService::class.java)
     }
 
-    suspend fun getFinancialInsight(ledgerSummary: String): String {
+    suspend fun getFinancialInsight(ledgerSummary: String, isArabic: Boolean = false): String {
         val apiKey = BuildConfig.GEMINI_API_KEY
         if (apiKey == "MY_GEMINI_API_KEY" || apiKey.isBlank()) {
-            return "Please configure your GEMINI_API_KEY in the AI Studio Secrets panel to enable real-time financial coach analysis."
+            return if (isArabic) {
+                "يرجى تهيئة مفتاح GEMINI_API_KEY في لوحة أسرار AI Studio لتمكين التحليل المباشر لمدرب الحسابات الذكي."
+            } else {
+                "Please configure your GEMINI_API_KEY in the AI Studio Secrets panel to enable real-time financial coach analysis."
+            }
         }
-        val systemPrompt = """
+        var systemPrompt = """
             You are "Pocket Ledger Coach", a friendly, brilliant, and hyper-practical financial advisor.
             Given a user's transaction ledger summary, budgets, and net worth, analyze their financial trajectory and habits.
             Keep your analysis highly punchy, constructive, and structured. 
@@ -78,6 +82,10 @@ object GeminiClient {
             3. Exactly 3 highly specific, highly actionable tips the user can apply today to save more.
             Format your response in a charming, spaced layout using bullet points. Refrain from boilerplate and keep it conversational yet direct. Limit responses to 200 words.
         """.trimIndent()
+
+        if (isArabic) {
+            systemPrompt += "\n\nIMPORTANT: You must write your entire response in friendly, clear, and professional Arabic. Translate all category names to Arabic in your response (e.g. food -> طعام, shopping -> تسوق, bills -> فواتير, transport -> نقل, leisure -> ترفيه, salary -> راتب, other -> أخرى)."
+        }
 
         val req = GenerateContentRequest(
             contents = listOf(
