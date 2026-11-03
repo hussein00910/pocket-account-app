@@ -117,15 +117,6 @@ esac
 
 
 # Determine the Java command to use to start the JVM.
-# Prefer the installed Microsoft JDK for this project instead of any stale Android Studio JBR setting.
-if [ -n "$JAVA_HOME" ] && [ ! -x "$JAVA_HOME/bin/java" ] ; then
-    export JAVA_HOME="C:/Program Files/Microsoft/jdk-17.0.19.10-hotspot"
-fi
-
-if [ -z "$JAVA_HOME" ] ; then
-    export JAVA_HOME="C:/Program Files/Microsoft/jdk-17.0.19.10-hotspot"
-fi
-
 if [ -n "$JAVA_HOME" ] ; then
     if [ -x "$JAVA_HOME/jre/sh/java" ] ; then
         # IBM's JDK on AIX uses strange locations for the executables

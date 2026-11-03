@@ -559,7 +559,6 @@ fun PocketLedgerScreen(
         )
     }
 }
-}
 
 // --- Total Net Worth Banner Card ---
 @Composable
@@ -1420,6 +1419,8 @@ fun TransactionItemRow(
                 }
             }
         }
+    }
+}
   // --- Custom Date Picker Dialog ---
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -1708,8 +1709,6 @@ fun AddTransactionModal(
             onDateSelected = { selectedDateMillis = it },
             onDismiss = { showDatePicker = false }
         )
-    }
-}
     }
 }
 
